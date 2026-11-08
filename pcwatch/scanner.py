@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 APP_DIR = Path.home() / ".pcwatch"
 BASELINE_FILE = APP_DIR / "baseline.json"
@@ -53,19 +54,29 @@ def build_snapshot(folder: str | Path) -> dict[str, Any]:
 
     snapshot = {}
     errors = []
-    for path in iter_files(root):
-        try:
-            rel = path.relative_to(root).as_posix()
-            stat = path.stat()
-            snapshot[rel] = {
-                "sha256": sha256_file(path),
-                "size_bytes": stat.st_size,
-                "modified_utc": datetime.fromtimestamp(
-                    stat.st_mtime, timezone.utc
-                ).isoformat()
-            }
-        except (OSError, PermissionError) as exc:
-            errors.append({"path": str(path), "error": str(exc)})
+    count = 0
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        TimeElapsedColumn(),
+        transient=False,
+    ) as progress:
+        task = progress.add_task(f"PC Watch hashing files in {root}", total=None)
+        for path in iter_files(root):
+            try:
+                rel = path.relative_to(root).as_posix()
+                stat = path.stat()
+                snapshot[rel] = {
+                    "sha256": sha256_file(path),
+                    "size_bytes": stat.st_size,
+                    "modified_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+                }
+                count += 1
+                progress.update(task, description=f"Hashing files... {count} processed")
+            except (OSError, PermissionError) as exc:
+                errors.append({"path": str(path), "error": str(exc)})
+                progress.update(task, description=f"Hashing files... {count} processed (some skipped)")
+        progress.update(task, description=f"Finished hashing {count} files")
 
     return {
         "folder": str(root),
