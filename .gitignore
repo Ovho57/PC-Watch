@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.log
+baseline.json
+activity_log.txt
+report.html
+quarantine/
