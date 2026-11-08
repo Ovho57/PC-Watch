@@ -6,8 +6,9 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 from rich import box
+from rich.text import Text
 
-from pcwatch.scanner import APP_DIR, BASELINE_FILE, save_baseline, load_baseline, check_changes, save_report
+from pcwatch.scanner import APP_DIR, save_baseline, load_baseline, check_changes, save_report
 
 console = Console()
 
@@ -64,13 +65,19 @@ def select_folder():
 
 def main():
     APP_DIR.mkdir(parents=True, exist_ok=True)
+    console.print()
+    console.print(Text("██████╗  ██████╗    ██╗    ██╗ █████╗ ████████╗ ██████╗██╗  ██╗", style="bold bright_magenta"))
+    console.print(Text("██╔══██╗██╔════╝    ██║    ██║██╔══██╗╚══██╔══╝██╔════╝██║  ██║", style="bold bright_magenta"))
+    console.print(Text("██████╔╝██║         ██║ █╗ ██║███████║   ██║   ██║     ███████║", style="bold bright_magenta"))
+    console.print(Text("██╔═══╝ ██║         ██║███╗██║██╔══██║   ██║   ██║     ██╔══██║", style="bold bright_magenta"))
+    console.print(Text("██║     ╚██████╗    ╚███╔███╔╝██║  ██║   ██║   ╚██████╗██║  ██║", style="bold bright_magenta"))
+    console.print(Text("╚═╝      ╚═════╝     ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝", style="bold bright_magenta"))
     console.print(Panel(
         "[bold bright_magenta]PC WATCH[/bold bright_magenta]\n"
         "Fast file and folder change monitor",
         subtitle="Local monitoring • No file hashing"
     ))
 
-    # Set up monitoring automatically the first time.
     try:
         load_baseline()
     except (OSError, ValueError, KeyError):
@@ -85,8 +92,7 @@ def main():
 
         if choice == "1":
             try:
-                baseline = load_baseline()
-                report = check_changes(baseline)
+                report = check_changes(load_baseline())
                 show_changes(report)
                 report_path = save_report(report)
                 console.print(f"\n[dim]Report saved: {report_path}[/dim]")
