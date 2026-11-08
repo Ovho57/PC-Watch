@@ -1,142 +1,100 @@
-"""PC Watch file-integrity scanner.
-
-This is a defensive, local-only utility. It hashes files under a folder chosen
-by the user and compares them with a saved baseline. It does not delete files,
-upload data, or claim to detect malware.
-"""
+"""Fast, local-only file and folder change monitor. No content hashing."""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 APP_DIR = Path.home() / ".pcwatch"
 BASELINE_FILE = APP_DIR / "baseline.json"
 REPORT_DIR = APP_DIR / "reports"
 
-# These suffixes are only review hints. An extension alone does NOT mean a file
-# is malicious. Users can edit this list to suit their environment.
-REVIEW_EXTENSIONS = {
-    ".exe", ".dll", ".bat", ".cmd", ".ps1", ".vbs", ".js",
-    ".scr", ".pif", ".com", ".jar", ".msi"
-}
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def local_time(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp).astimezone().strftime("%Y-%m-%d %I:%M:%S %p")
 
-def iter_files(root: Path):
-    """Yield regular files beneath root without following symlinks."""
-    root = root.resolve()
-    for current, dirs, files in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        dirs[:] = [d for d in dirs if not (current_path / d).is_symlink()]
-        for filename in files:
-            path = current_path / filename
-            try:
-                if path.is_symlink() or not path.is_file():
-                    continue
-                yield path
-            except (OSError, PermissionError):
-                continue
 
-def build_snapshot(folder: str | Path) -> dict[str, Any]:
+def collect_metadata(folder: str | Path) -> dict[str, Any]:
     root = Path(folder).expanduser().resolve()
     if not root.exists() or not root.is_dir():
         raise ValueError(f"Folder does not exist or is not a directory: {root}")
 
-    snapshot = {}
-    errors = []
-    count = 0
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold cyan]{task.description}"),
-        TimeElapsedColumn(),
-        transient=False,
-    ) as progress:
-        task = progress.add_task(f"PC Watch hashing files in {root}", total=None)
-        for path in iter_files(root):
+    entries: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    # Include folders as well as files. os.walk does not follow symlinks.
+    for current, dirs, files in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        dirs[:] = [d for d in dirs if not (current_path / d).is_symlink()]
+        for name in list(dirs) + files:
+            path = current_path / name
             try:
-                rel = path.relative_to(root).as_posix()
+                if path.is_symlink():
+                    continue
                 stat = path.stat()
-                snapshot[rel] = {
-                    "sha256": sha256_file(path),
-                    "size_bytes": stat.st_size,
-                    "modified_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+                relative = path.relative_to(root).as_posix()
+                entries[relative] = {
+                    "type": "folder" if path.is_dir() else "file",
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                    "modified_display": local_time(stat.st_mtime),
                 }
-                count += 1
-                progress.update(task, description=f"Hashing files... {count} processed")
-            except (OSError, PermissionError) as exc:
-                errors.append({"path": str(path), "error": str(exc)})
-                progress.update(task, description=f"Hashing files... {count} processed (some skipped)")
-        progress.update(task, description=f"Finished hashing {count} files")
+            except OSError as exc:
+                errors.append(f"{path}: {exc}")
 
     return {
         "folder": str(root),
-        "created_utc": datetime.now(timezone.utc).isoformat(),
-        "files": snapshot,
-        "scan_errors": errors
+        "updated": datetime.now().astimezone().isoformat(),
+        "entries": entries,
+        "errors": errors,
     }
 
-def save_baseline(folder: str | Path, destination: Path = BASELINE_FILE):
-    snapshot = build_snapshot(folder)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(".tmp")
-    temporary.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
-    temporary.replace(destination)
+
+def save_baseline(folder: str | Path):
+    snapshot = collect_metadata(folder)
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    temp = BASELINE_FILE.with_suffix(".tmp")
+    temp.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+    temp.replace(BASELINE_FILE)
     return snapshot
 
-def load_baseline(path: Path = BASELINE_FILE) -> dict[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(
-            "No baseline found. Create one first with the 'baseline' command."
-        )
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data.get("files"), dict) or not data.get("folder"):
-        raise ValueError("Baseline file is malformed.")
+
+def load_baseline() -> dict[str, Any]:
+    if not BASELINE_FILE.exists():
+        raise FileNotFoundError("No folder is selected yet. Choose option 2 first.")
+    data = json.loads(BASELINE_FILE.read_text(encoding="utf-8"))
+    if not isinstance(data.get("entries"), dict) or not data.get("folder"):
+        raise ValueError("Saved monitor data is invalid. Choose option 2 to reset it.")
     return data
 
-def compare_to_baseline(baseline: dict[str, Any]) -> dict[str, Any]:
-    root = Path(baseline["folder"])
-    current = build_snapshot(root)
-    old_files = baseline["files"]
-    new_files = current["files"]
 
-    added = sorted(set(new_files) - set(old_files))
-    missing = sorted(set(old_files) - set(new_files))
-    modified = sorted(
-        name for name in set(old_files) & set(new_files)
-        if old_files[name]["sha256"] != new_files[name]["sha256"]
-    )
-
-    review = sorted(
-        name for name in new_files
-        if Path(name).suffix.lower() in REVIEW_EXTENSIONS
-    )
-
+def check_changes(baseline: dict[str, Any]) -> dict[str, Any]:
+    current = collect_metadata(baseline["folder"])
+    old = baseline["entries"]
+    new = current["entries"]
+    added = [(name, new[name]) for name in sorted(set(new) - set(old))]
+    missing = [(name, old[name]) for name in sorted(set(old) - set(new))]
+    modified = []
+    for name in sorted(set(old) & set(new)):
+        before, after = old[name], new[name]
+        if (before.get("type") != after.get("type")
+                or before.get("size") != after.get("size")
+                or before.get("modified") != after.get("modified")):
+            modified.append((name, after))
     return {
-        "folder": str(root),
-        "checked_utc": current["created_utc"],
+        "folder": baseline["folder"],
+        "checked": datetime.now().astimezone().strftime("%Y-%m-%d %I:%M:%S %p"),
         "added": added,
         "modified": modified,
         "missing": missing,
-        "review_extensions": review,
-        "scan_errors": current["scan_errors"],
-        "total_files": len(new_files)
+        "errors": current["errors"],
     }
 
-def save_report(report: dict[str, Any], destination: Path | None = None):
+
+def save_report(report: dict[str, Any]):
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    if destination is None:
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        destination = REPORT_DIR / f"scan-{stamp}.json"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    return destination
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = REPORT_DIR / f"changes-{stamp}.json"
+    path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return path
