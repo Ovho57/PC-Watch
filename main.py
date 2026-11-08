@@ -7,6 +7,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.prompt import Prompt, Confirm
 from rich import box
+from rich.text import Text
 
 from pcwatch.scanner import (
     APP_DIR, BASELINE_FILE, save_baseline, load_baseline,
@@ -48,11 +49,14 @@ def show_report(report):
 
 def main():
     APP_DIR.mkdir(parents=True, exist_ok=True)
-    console.print(Panel(
-        "[bold bright_magenta]PC WATCH[/bold bright_magenta]\n"
-        "Local file integrity monitoring",
-        subtitle="Windows / macOS / Linux"
-    ))
+    console.print()
+    console.print(Text("██████╗  ██████╗    ██╗    ██╗ █████╗ ████████╗ ██████╗██╗  ██╗", style="bold bright_magenta"))
+    console.print(Text("██╔══██╗██╔════╝    ██║    ██║██╔══██╗╚══██╔══╝██╔════╝██║  ██║", style="bold bright_magenta"))
+    console.print(Text("██████╔╝██║         ██║ █╗ ██║███████║   ██║   ██║     ███████║", style="bold bright_magenta"))
+    console.print(Text("██╔═══╝ ██║         ██║███╗██║██╔══██║   ██║   ██║     ██╔══██║", style="bold bright_magenta"))
+    console.print(Text("██║     ╚██████╗    ╚███╔███╔╝██║  ██║   ██║   ╚██████╗██║  ██║", style="bold bright_magenta"))
+    console.print(Text("╚═╝      ╚═════╝     ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝", style="bold bright_magenta"))
+    console.print(Panel("PC Watch | Local file integrity monitoring", subtitle="Windows / macOS / Linux"))
 
     while True:
         console.print("\n[bold]1[/bold] Create or replace baseline")
